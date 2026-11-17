@@ -94,13 +94,25 @@ public struct ChapterImageParser: Sendable {
                 // Only complete URL lines become images. Prose containing a
                 // web address remains prose, even in a mixed image chapter.
                 let urlPart = line.range(of: #",\s*(?=\{)"#, options: .regularExpression).map { String(line[..<$0.lowerBound]) } ?? line
-                let imageExtension = URL(string: urlPart)?.pathExtension.lowercased()
-                let looksLikeImage = imageExtension.map { ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"].contains($0) } ?? false
-                if !urlPart.contains(where: { $0.isWhitespace || $0 == "<" || $0 == ">" }), (allowBareURLs || looksLikeImage),
+                let imageExtension: String? = URL(string: urlPart)?.pathExtension.lowercased()
+                let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif", "avif", "bmp"]
+                let looksLikeImage: Bool
+                if let imageExtension {
+                    looksLikeImage = imageExtensions.contains(imageExtension)
+                } else {
+                    looksLikeImage = false
+                }
+                let hasProseCharacters: Bool = urlPart.contains(where: { $0.isWhitespace || $0 == "<" || $0 == ">" })
+                let hasImagePrefix: Bool = line.hasPrefix("http://")
+                    || line.hasPrefix("https://")
+                    || line.hasPrefix("//")
+                    || line.hasPrefix("/")
+                    || line.hasPrefix("data:image/")
+                let bareURLCandidate: Bool = allowBareURLs && urlPart.contains("/")
+                if !hasProseCharacters,
+                   allowBareURLs || looksLikeImage,
                    let address = resolve(line, baseURL: baseURL),
-                   line.hasPrefix("http://") || line.hasPrefix("https://") || line.hasPrefix("//")
-                    || line.hasPrefix("/") || line.hasPrefix("data:image/") || looksLikeImage
-                    || (allowBareURLs && urlPart.contains("/")) {
+                   hasImagePrefix || looksLikeImage || bareURLCandidate {
                     blocks.append(.init(range: range, content: .image(address)))
                 } else if let text = MetadataTextSanitizer().clean(line) {
                     blocks.append(.init(range: range, content: .text(text)))
