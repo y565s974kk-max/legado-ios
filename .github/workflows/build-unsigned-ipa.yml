@@ -8,6 +8,14 @@ on:
         description: "构建配置"
         required: false
         default: Release
+      runner:
+        description: "Runner 标签（容量不足时可换 macos-15）"
+        required: false
+        default: macos-26
+      xcode:
+        description: "优先使用的 Xcode 版本（留空=镜像默认）"
+        required: false
+        default: "26.1.1"
 
 permissions:
   contents: read
@@ -15,21 +23,32 @@ permissions:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-26
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          WANT="${{ inputs.xcode }}"
+          echo "--- installed Xcode ---"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          if [ -n "$WANT" ] && [ -d "/Applications/Xcode_${WANT}.app" ]; then
+            echo "selecting Xcode_${WANT}.app"
+            sudo xcode-select -s "/Applications/Xcode_${WANT}.app"
+          else
+            echo "wanted Xcode '${WANT}' not present, keeping default"
+          fi
+
       - name: Show toolchain
         run: |
+          set -euo pipefail
           sw_vers
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-          echo "--- installed Xcode ---"
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          echo "--- schemes ---"
           xcodebuild -project Legado.xcodeproj -list
 
       - name: Resolve Swift packages
@@ -98,11 +117,10 @@ jobs:
           test -f "$APP/Legado" || { echo "::error::缺少主二进制"; exit 1; }
           echo "--- arch ---"
           lipo -info "$APP/Legado"
-          echo "--- signature (应为未签名/ad-hoc) ---"
+          echo "--- signature (应为未签名) ---"
           codesign -dv "$APP" 2>&1 || echo "(未签名)"
-          echo "--- 检查是否残留描述文件/签名资源 ---"
+          echo "--- 描述文件检查 ---"
           ls "$APP/embedded.mobileprovision" 2>/dev/null && echo "::warning::包含描述文件" || echo "无描述文件（符合预期）"
-          echo "--- 包体大小 ---"
           du -sh "$APP"
 
       - name: Upload artifact
