@@ -1,0 +1,116 @@
+name: build-unsigned-ipa
+
+# 在个人 fork 中一键产出未签名 IPA（用自己的 Apple ID 签名后安装）
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: "构建配置"
+        required: false
+        default: Release
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          echo "--- installed Xcode ---"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          echo "--- schemes ---"
+          xcodebuild -project Legado.xcodeproj -list
+
+      - name: Resolve Swift packages
+        run: |
+          set -o pipefail
+          xcodebuild -project Legado.xcodeproj \
+            -scheme Legado \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "$PWD/.spm-cache"
+
+      - name: Build for device (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild -project Legado.xcodeproj \
+            -scheme Legado \
+            -configuration "${{ inputs.configuration }}" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/DerivedData" \
+            -clonedSourcePackagesDirPath "$PWD/.spm-cache" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM="" \
+            build
+
+      - name: Package unsigned IPA
+        id: package
+        run: |
+          set -euo pipefail
+          CONFIG="${{ inputs.configuration }}"
+          APP="DerivedData/Build/Products/${CONFIG}-iphoneos/Legado.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::找不到构建产物 $APP"
+            find DerivedData/Build/Products -maxdepth 2 -name "*.app" || true
+            exit 1
+          fi
+
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          MIN_IOS=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")
+          echo "bundle=$BUNDLE_ID version=$VERSION build=$BUILD min_ios=$MIN_IOS"
+
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          NAME="legado-ios-v${VERSION}-b${BUILD}-unsigned.ipa"
+          ( cd out && zip -qry "$NAME" Payload )
+          shasum -a 256 "out/$NAME" | tee out/SHA256SUMS
+
+          echo "ipa_name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "min_ios=$MIN_IOS" >> "$GITHUB_OUTPUT"
+          ls -lh out
+
+      - name: Verify IPA contents
+        run: |
+          set -euo pipefail
+          NAME="${{ steps.package.outputs.ipa_name }}"
+          rm -rf verify && mkdir verify
+          ( cd verify && unzip -q "../out/$NAME" )
+          APP=verify/Payload/Legado.app
+          test -f "$APP/Legado" || { echo "::error::缺少主二进制"; exit 1; }
+          echo "--- arch ---"
+          lipo -info "$APP/Legado"
+          echo "--- signature (应为未签名/ad-hoc) ---"
+          codesign -dv "$APP" 2>&1 || echo "(未签名)"
+          echo "--- 检查是否残留描述文件/签名资源 ---"
+          ls "$APP/embedded.mobileprovision" 2>/dev/null && echo "::warning::包含描述文件" || echo "无描述文件（符合预期）"
+          echo "--- 包体大小 ---"
+          du -sh "$APP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: legado-ios-unsigned-ipa
+          path: |
+            out/${{ steps.package.outputs.ipa_name }}
+            out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
