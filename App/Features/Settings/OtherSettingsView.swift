@@ -23,6 +23,7 @@ struct OtherSettingsView: View {
                 Picker("启动页面", selection: $defaultHomePage) {
                     Text("书架").tag("bookshelf")
                     Text("发现").tag("explore")
+                    Text("订阅").tag("rss")
                     Text("统计").tag("statistics")
                     Text("设置").tag("settings")
                 }
