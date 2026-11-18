@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct RootTabView: View {
     @EnvironmentObject private var sourceLibrary: SourceLibraryModel
-    private enum Tab: Hashable { case bookshelf, explore, statistics, my }
+    private enum Tab: Hashable { case bookshelf, explore, rss, statistics, my }
     @State private var selection: Tab
     @State private var showsDemoReader = false
     @State private var didOpenDemoReader = false
@@ -17,11 +17,13 @@ struct RootTabView: View {
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         let initial: Tab = switch requested {
         case "explore": .explore
+        case "rss": .rss
         case "statistics": .statistics
         case "settings": .my
         default:
             switch UserDefaults.standard.string(forKey: "defaultHomePage") {
             case "explore": .explore
+            case "rss": .rss
             case "statistics": .statistics
             case "settings": .my
             default: .bookshelf
@@ -78,6 +80,10 @@ struct RootTabView: View {
             ReadingNavigationStack { ExploreView() }
                 .tabItem { Label("发现", systemImage: "safari").environment(\.symbolVariants, .none) }
                 .tag(Tab.explore)
+
+            ReadingNavigationStack { RSSHomeView() }
+                .tabItem { Label("订阅", systemImage: "dot.radiowaves.left.and.right").environment(\.symbolVariants, .none) }
+                .tag(Tab.rss)
 
             ReadingNavigationStack { ReadingStatisticsView() }
                 .tabItem { Label("统计", systemImage: selection == .statistics ? "chart.bar.fill" : "chart.bar").environment(\.symbolVariants, .none) }
