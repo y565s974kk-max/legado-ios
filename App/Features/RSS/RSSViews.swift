@@ -10,6 +10,7 @@ struct RSSHomeView: View {
     @State private var searchText = ""
     @State private var showsFiles = false
     @State private var showsTextImport = false
+    @State private var showsQR = false
     @State private var showsExport = false
     @State private var confirmsClear = false
     @State private var editingStar: RssStar?
@@ -32,6 +33,7 @@ struct RSSHomeView: View {
                     NavigationLink { RuleSubscriptionView() } label: { Label("规则订阅", systemImage: "link") }
                     Button("导入文件", systemImage: "doc.badge.plus") { showsFiles = true }
                     Button("URL或粘贴JSON", systemImage: "link.badge.plus") { showsTextImport = true }
+                    Button { showsQR = true } label: { Label("扫码导入", systemImage: "qrcode.viewfinder") }
                     Button("导出全部RSS源", systemImage: "square.and.arrow.up") { showsExport = true }
                 }
             }
@@ -47,6 +49,9 @@ struct RSSHomeView: View {
         })
         let sheets = AnyView(importing
             .sheet(isPresented: $showsTextImport) { RSSImportSheet() }
+            .sheet(isPresented: $showsQR) {
+                QRCodeImportView { value in Task { await library.importText(value) } }
+            }
             .sheet(item: $editingStar) { value in
                 RSSStarEditSheet(star: value, save: { updated in
                     Task { await library.saveStar(updated) }
@@ -78,7 +83,19 @@ struct RSSHomeView: View {
     private var sourceList: some View {
         List {
             if filteredSources.isEmpty {
-                ReadingUnavailableView("还没有RSS源", systemImage: "dot.radiowaves.left.and.right", description: Text("从文件、URL或剪贴板导入 RSS 源。"))
+                Section {
+                    ReadingUnavailableView(
+                        "还没有订阅源",
+                        systemImage: "dot.radiowaves.left.and.right",
+                        description: Text("从文件、URL 或剪贴板导入阅读（Legado）RSS 订阅源，支持单个源、多个源和订阅链接。")
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    Button { showsFiles = true } label: { Label("导入订阅源文件", systemImage: "doc.badge.plus") }
+                    Button { showsTextImport = true } label: { Label("粘贴 JSON 或 URL", systemImage: "link.badge.plus") }
+                    Button { showsQR = true } label: { Label("扫码导入", systemImage: "qrcode.viewfinder") }
+                    NavigationLink { RSSSourceEditorView() } label: { Label("新建订阅源", systemImage: "plus") }
+                }
             }
             ForEach(filteredSources) { source in
                 NavigationLink { RSSSourceDestinationView(sourceURL: source.sourceUrl) } label: {
@@ -599,6 +616,9 @@ private struct RSSImportSheet: View {
             TextEditor(text: $text).font(.system(.body, design: .monospaced)).padding()
                 .navigationTitle("导入RSS源")
                 .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button { if let clip = UIPasteboard.general.string, !clip.isEmpty { text = clip } } label: { Label("粘贴", systemImage: "doc.on.clipboard") }
+                    }
                     ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) { Button("导入") { Task { await library.importText(text); dismiss() } }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
                 }
